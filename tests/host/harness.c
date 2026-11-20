@@ -472,6 +472,52 @@ static void test_psn_account_id(void) {
     config_load();
 }
 
+/* profiles: a file each, with its own PSN account, consoles and settings; the last one chosen is
+ * remembered */
+static void test_profiles(void) {
+    expect(config_profile_count() == 1 && config_profile_current() == 0 && !strcmp(config_profile_name(0), "Profile 1"),
+           "one profile to start with, named Profile 1 until it signs in");
+    const uint8_t id[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+    config_psn_set(id, "PlayerA", "", "");
+    config_get()->stream.bitrate_kbps = 9000;
+    config_save();
+    int b = config_profile_create();
+    expect(b == 1 && config_profile_count() == 2 && config_profile_current() == 1 && config_host_count() == 0 &&
+               !config_psn()->linked && config_get()->stream.bitrate_kbps == 15000,
+           "a new profile starts empty: no consoles, no PSN account, default settings");
+    expect(strstr(config_path(), "/hotaru-2.conf") != NULL, "profile 2 is hotaru-2.conf");
+    expect(!strcmp(config_profile_name(0), "PlayerA") && !strcmp(config_profile_name(1), "Profile 2"),
+           "a profile is named by its PSN online ID");
+    config_host_t h = { .is_ps5 = true, .server_mac = { 0x02, 0, 0, 0, 0, 0x42 } };
+    snprintf(h.addr, sizeof(h.addr), "192.0.2.42");
+    config_host_add(&h);
+    config_save();
+    expect(config_profile_select(0) && config_host_count() == 0 && config_psn()->linked &&
+               config_get()->stream.bitrate_kbps == 9000,
+           "switching back loads profile 1's account and settings, without profile 2's console");
+    expect(config_profile_select(1) && config_host_count() == 1 && !config_psn()->linked,
+           "and profile 2 keeps its own console");
+    char pf[sizeof(CONFIG_DIR) + 16];
+    snprintf(pf, sizeof(pf), "%s/profile", CONFIG_DIR);
+    FILE *f = fopen(pf, "r");
+    int last = 0;
+    if (f) {
+        if (fscanf(f, "%d", &last) != 1) last = 0;
+        fclose(f);
+    }
+    expect(last == 2, "the profile last chosen is remembered for the next start");
+    char p2[sizeof(CONFIG_DIR) + 32];
+    snprintf(p2, sizeof(p2), "%s/hotaru-2.conf", CONFIG_DIR);
+    config_profile_select(0);
+    unlink(p2);
+    unlink(pf);
+    config_psn_clear();
+    config_get()->stream.bitrate_kbps = 15000;
+    config_save();
+    unlink(config_path());
+    config_load();
+}
+
 /* media/feeder.c: buffers reach the worker in order, and a full queue refuses instead of blocking */
 static SDL_sem *g_feed_gate;
 static SDL_atomic_t g_feed_n;
@@ -575,6 +621,7 @@ int main(int argc, char **argv) {
         test_tv_identity();
         test_host_identity();
         test_psn_account_id();
+        test_profiles();
         test_feeder();
         test_pacer();
         test_update_versions();
@@ -1798,6 +1845,27 @@ int main(int argc, char **argv) {
     update_fake("v0.0.1");
     pump(100);
     expect(!app_update_version()[0], "an older release is no update");
+
+    /* profiles at Home: New profile starts an empty one and opens Add a console; Switch profile lists
+     * them, the current one focused, and picking another brings its consoles back */
+    int prof_hosts = app_host_count();
+    ui_profile_new();
+    pump(400);
+    expect(config_profile_count() == 2 && app_host_count() == 0 && ui_register_active(),
+           "New profile: an empty profile, and Add a console opens on it");
+    for (int i = 0; i < 6 && ui_register_active(); i++) {
+        ui_back();
+        pump(300);
+    }
+    ui_profile_choose();
+    pump(400);
+    expect(ui_choose_active() && ui_dialog_focus() == 1, "Switch profile lists them, the current one focused");
+    shot("profile-choose");
+    key(SDLK_UP);
+    key(SDLK_RETURN);
+    pump(400);
+    expect(!ui_choose_active() && config_profile_current() == 0 && app_host_count() == prof_hosts,
+           "picking the first profile brings its consoles back");
 
     printf("== %d failure(s)\n", g_fail);
     return g_fail ? 1 : 0;

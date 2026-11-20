@@ -6,7 +6,9 @@
  * (its login passcode): digit boxes and a number pad, the screen behind it stays in view; OK takes
  * the focus once every digit is in, and the remote's number keys type straight in.
  *
- * Both sit on the top layer and take every key from ui.c while open (ui_dialog_key, Circle /
+ * ui_choose: a card with a column of options (the profiles at start), Up/Down to move, Cross to
+ * pick; Circle / Back cancels with -1.
+ * All sit on the top layer and take every key from ui.c while open (ui_dialog_key, Circle /
  * Back = ui_dialog_back = cancel). A callback runs after the dialog is gone, through an async
  * call, so it may change app state (which can rebuild the UI).
  */
@@ -21,12 +23,19 @@
 
 typedef void (*ui_confirm_cb_t)(void *user);
 typedef void (*ui_passcode_cb_t)(const char *code, void *user); /* code NULL on cancel */
+typedef void (*ui_choose_cb_t)(int index, void *user);          /* index -1 on cancel */
+
+#define UI_CHOOSE_MAX 8
 
 /* art: the console it is about, ART__N for none. No-op while a dialog is open */
 void ui_confirm(const char *title, const char *message, const char *confirm_text, art_id_t art,
                 ui_confirm_cb_t on_confirm, void *user);
 void ui_passcode(const char *title, const char *message, int digits, const char *ok_text, ui_passcode_cb_t on_done,
                  void *user);
+
+/* up to UI_CHOOSE_MAX options, the focus starting on `focus`; the texts are copied */
+void ui_choose(const char *title, const char *message, const char *const *options, int count, int focus,
+               ui_choose_cb_t on_done, void *user);
 
 bool ui_dialog_active(void);
 void ui_dialog_key(uint32_t key); /* LV_KEY_*, or a typed digit */
@@ -35,6 +44,7 @@ void ui_dialog_back(void);        /* cancel */
 /* for tests */
 bool ui_confirm_active(void);
 bool ui_passcode_active(void);
+bool ui_choose_active(void);
 int ui_dialog_focus(void); /* 0 Cancel, 1 the action, 2 the number pad */
 const char *ui_passcode_text(void);
 lv_obj_t *ui_dialog_root(void);

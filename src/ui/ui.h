@@ -35,4 +35,10 @@ void ui_pad_shift(void);    /* input hook: L2/R2, the on-screen keyboard's capit
 bool ui_back(void);         /* one level back; false at Home's top level (Back exits) */
 void ui_cover(bool on);     /* a full-screen overlay covers Home: Home stops drawing */
 
+/* profiles: ui_profile_choose lists them to switch to (Settings > PSN account); ui_profile_start,
+ * called once after the splash is shown, asks which one at start when there is more than one */
+void ui_profile_choose(void);
+void ui_profile_start(void);
+void ui_profile_new(void); /* an empty profile, then Add a console */
+
 #endif

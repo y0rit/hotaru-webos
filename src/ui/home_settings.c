@@ -18,6 +18,7 @@
 #include "controls.h"
 #include "dialog.h"
 #include "home_internal.h"
+#include "ui.h"
 #include "log_view.h"
 #include "logo.h"
 #include "motion.h"
@@ -37,7 +38,7 @@
 #define PAD_BATT_Y 326
 
 typedef enum { ROW_SEG, ROW_METER, ROW_TOGGLE, ROW_ACTION, ROW_INFO } row_kind_t;
-typedef enum { ACT_NONE, ACT_ADD, ACT_FIND, ACT_SIGN_OUT } row_action_t;
+typedef enum { ACT_NONE, ACT_ADD, ACT_FIND, ACT_PROFILE, ACT_NEW_PROFILE, ACT_SIGN_OUT } row_action_t;
 
 typedef struct {
     lv_obj_t *row, *caption;
@@ -310,6 +311,10 @@ static void build_account(void) {
                LV_SYMBOL_PLUS, false);
     row_action(add_row(SET_ACCOUNT, "Find my consoles", "List the consoles on your PSN account"), ACT_FIND,
                LV_SYMBOL_REFRESH, false);
+    row_action(add_row(SET_ACCOUNT, "Switch profile", "Another player's PSN account, consoles and settings"),
+               ACT_PROFILE, LV_SYMBOL_SHUFFLE, false);
+    row_action(add_row(SET_ACCOUNT, "New profile", "For another PSN account: pair its console next"), ACT_NEW_PROFILE,
+               LV_SYMBOL_PLUS, false);
     row_action(add_row(SET_ACCOUNT, "Sign out of PSN", "Keeps the consoles paired with a PIN"), ACT_SIGN_OUT,
                LV_SYMBOL_CLOSE, true);
     lv_obj_t *c = summary(SET_ACCOUNT, "PLAYSTATION NETWORK");
@@ -459,7 +464,11 @@ static void refresh_account(void) {
     lv_obj_set_style_text_color(g.acc_status, C(rs == APP_REG_FAILED ? COL_DANGER_TEXT : COL_ACCENT_HI), 0);
     /* Find needs a token, Sign out something to sign out of */
     lv_obj_set_style_opa(g.rows[SET_ACCOUNT][1].row, psn->access_token[0] ? LV_OPA_COVER : LV_OPA_50, 0);
-    lv_obj_set_style_opa(g.rows[SET_ACCOUNT][2].row,
+    /* Switch needs another profile, New room for one */
+    lv_obj_set_style_opa(g.rows[SET_ACCOUNT][2].row, config_profile_count() > 1 ? LV_OPA_COVER : LV_OPA_50, 0);
+    lv_obj_set_style_opa(g.rows[SET_ACCOUNT][3].row,
+                         config_profile_count() < CONFIG_MAX_PROFILES ? LV_OPA_COVER : LV_OPA_50, 0);
+    lv_obj_set_style_opa(g.rows[SET_ACCOUNT][4].row,
                          psn->linked || config_psn_has_account_id() ? LV_OPA_COVER : LV_OPA_50, 0);
 }
 
@@ -530,6 +539,14 @@ static void run_action(prow_t *r) {
         case ACT_ADD: ui_register_open(); break;
         case ACT_FIND:
             if (psn->access_token[0]) app_psn_refresh();
+            else bump(r->row, 1);
+            break;
+        case ACT_PROFILE:
+            if (config_profile_count() > 1) ui_profile_choose();
+            else bump(r->row, 1);
+            break;
+        case ACT_NEW_PROFILE:
+            if (config_profile_count() < CONFIG_MAX_PROFILES) ui_profile_new();
             else bump(r->row, 1);
             break;
         case ACT_SIGN_OUT:

@@ -17,24 +17,30 @@
 #define SHEET_X     160
 #define PASS_KEY    80
 #define PASS_MAX    CTL_DIGITS_MAX
+#define CHOOSE_W    760
+#define CHOOSE_BTN  640
 
 enum { F_CANCEL, F_OK, F_PAD };
 
 static struct {
-    lv_obj_t *root, *scrim, *card, *btn[2];
-    bool passcode, closing;
+    lv_obj_t *root, *scrim, *card, *btn[2], *opt[UI_CHOOSE_MAX];
+    bool passcode, choose, closing;
+    int count;
     int focus, digits;
     char code[PASS_MAX + 1];
     ctl_numpad_t np;
     ctl_digits_t dg;
     ui_confirm_cb_t ccb;
     ui_passcode_cb_t pcb;
+    ui_choose_cb_t chcb;
     void *user;
 } D;
 
 typedef struct {
     ui_confirm_cb_t ccb;
     ui_passcode_cb_t pcb;
+    ui_choose_cb_t chcb;
+    int index;
     void *user;
     bool ok;
     char code[PASS_MAX + 1];
@@ -47,6 +53,7 @@ static void done_async(void *p) {
     memset(&D, 0, sizeof(D));
     if (d->ok && d->ccb) d->ccb(d->user);
     if (d->pcb) d->pcb(d->ok ? d->code : NULL, d->user);
+    if (d->chcb) d->chcb(d->ok ? d->index : -1, d->user);
     free(d);
 }
 
@@ -57,6 +64,8 @@ static void finish(bool ok) {
     D.closing = true;
     d->ccb = D.ccb;
     d->pcb = D.pcb;
+    d->chcb = D.chcb;
+    d->index = D.focus;
     d->user = D.user;
     d->ok = ok;
     memcpy(d->code, D.code, sizeof(d->code));
@@ -65,7 +74,9 @@ static void finish(bool ok) {
 }
 
 static void paint(void) {
-    if (D.passcode) {
+    if (D.choose) {
+        for (int i = 0; i < D.count; i++) ctl_button_focus(D.opt[i], D.focus == i);
+    } else if (D.passcode) {
         ctl_numpad_focus(&D.np, D.focus == F_PAD);
         ctl_button_focus(D.btn[F_CANCEL], D.focus == F_CANCEL);
         ctl_button_focus(D.btn[F_OK], D.focus == F_OK);
@@ -168,6 +179,47 @@ void ui_passcode(const char *title, const char *message, int digits, const char 
     log_event(LOG_INFO, "UI", "passcode: %s", title);
 }
 
+void ui_choose(const char *title, const char *message, const char *const *options, int count, int focus,
+               ui_choose_cb_t on_done, void *user) {
+    if (D.root || count <= 0) return;
+    memset(&D, 0, sizeof(D));
+    D.choose = true;
+    D.chcb = on_done;
+    D.user = user;
+    D.count = count > UI_CHOOSE_MAX ? UI_CHOOSE_MAX : count;
+    D.focus = focus >= 0 && focus < D.count ? focus : 0;
+    open_root(160);
+    lv_coord_t tw = CHOOSE_W - 2 * CONFIRM_PAD;
+    lv_obj_t *body = ctl_label(D.root, FONT_BODY, COL_SUBTLE, message ? message : ""); /* measured, then moved in */
+    lv_obj_set_width(body, tw);
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_update_layout(body);
+    lv_coord_t body_h = message && *message ? lv_obj_get_height(body) + 28 : 0;
+    lv_coord_t list_y = CONFIRM_PAD + 56 + body_h;
+    lv_coord_t h = list_y + D.count * (BTN_H + 16) - 16 + CONFIRM_PAD;
+    D.card = ctl_rect(D.root, CHOOSE_W, h, 36, COL_SHEET, 250);
+    lv_obj_set_style_border_width(D.card, 2, 0);
+    lv_obj_set_style_border_color(D.card, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(D.card, LV_OPA_20, 0);
+    lv_obj_set_style_shadow_width(D.card, 90, 0);
+    lv_obj_set_style_shadow_opa(D.card, LV_OPA_60, 0);
+    lv_obj_center(D.card);
+    lv_obj_t *ttl = ctl_label(D.card, FONT_TITLE, COL_TEXT, title);
+    lv_obj_set_width(ttl, tw);
+    lv_label_set_long_mode(ttl, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(ttl, CONFIRM_PAD, CONFIRM_PAD + 4);
+    lv_obj_set_parent(body, D.card);
+    lv_obj_set_pos(body, CONFIRM_PAD, CONFIRM_PAD + 56);
+    for (int i = 0; i < D.count; i++) {
+        D.opt[i] = ctl_button(D.card, CHOOSE_BTN, BTN_H, NULL, options[i]);
+        lv_obj_set_pos(D.opt[i], (CHOOSE_W - CHOOSE_BTN) / 2, list_y + i * (BTN_H + 16));
+    }
+    motion_from(D.card, MO_GROW, -40, 0, 420, 0, motion_spring);
+    motion_from(D.card, MO_OPA, 0, 255, 220, 0, NULL);
+    paint();
+    log_event(LOG_INFO, "UI", "choose: %s", title);
+}
+
 static void pass_type(char c) {
     size_t n = strlen(D.code);
     if (c == '\b') {
@@ -185,7 +237,14 @@ void ui_dialog_key(uint32_t k) {
         finish(false);
         return;
     }
-    if (D.passcode) {
+    if (D.choose) {
+        if (k == LV_KEY_UP && D.focus > 0) D.focus--;
+        else if (k == LV_KEY_DOWN && D.focus < D.count - 1) D.focus++;
+        else if (k == LV_KEY_ENTER) {
+            finish(true);
+            return;
+        }
+    } else if (D.passcode) {
         if (k >= '0' && k <= '9') pass_type((char)k);
         else if (k == LV_KEY_BACKSPACE) pass_type('\b');
         else if (D.focus == F_PAD) {
@@ -222,7 +281,8 @@ void ui_dialog_key(uint32_t k) {
 void ui_dialog_back(void) { finish(false); }
 
 bool ui_dialog_active(void) { return D.root != NULL; }
-bool ui_confirm_active(void) { return D.root && !D.passcode; }
+bool ui_confirm_active(void) { return D.root && !D.passcode && !D.choose; }
+bool ui_choose_active(void) { return D.root && D.choose; }
 bool ui_passcode_active(void) { return D.root && D.passcode; }
 int ui_dialog_focus(void) { return D.focus; }
 const char *ui_passcode_text(void) { return D.code; }

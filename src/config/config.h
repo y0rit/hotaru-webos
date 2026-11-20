@@ -31,6 +31,11 @@
  *   psn.account_id=<16 hex>
  *   host.0.nickname=PS5-123
  *   host.0.rp_key=<32 hex>
+ *
+ * Profiles: each profile is a file of its own in that directory, so it has its own PSN account,
+ * consoles and settings. Profile 1 is hotaru.conf (the file from before profiles existed);
+ * profile n > 1 is hotaru-<n>.conf. The file `profile` holds the number of the profile last
+ * chosen, which config_load() opens. A profile is named by its PSN online ID, else "Profile <n>".
  */
 #ifndef HOTARU_CONFIG_H
 #define HOTARU_CONFIG_H
@@ -38,8 +43,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define CONFIG_MAX_HOSTS 16
-#define CONFIG_DUID_LEN  48 /* chiaki's DUID_PREFIX (16 hex) + 16 random bytes as hex */
+#define CONFIG_MAX_HOSTS    16
+#define CONFIG_MAX_PROFILES 8
+#define CONFIG_DUID_LEN     48 /* chiaki's DUID_PREFIX (16 hex) + 16 random bytes as hex */
 
 typedef enum { CODEC_H264, CODEC_H265, CODEC_H265_HDR } video_codec_t;
 
@@ -123,5 +129,12 @@ bool config_psn_has_account_id(void);                        /* an id is stored 
 void config_psn_clear(void);
 
 const char *config_device_uid(void); /* stable device UID; generated (and saved) on first call */
+
+/* profiles, by index 0..count-1 in profile-number order; index 0 is always profile 1 */
+int config_profile_count(void);
+int config_profile_current(void);           /* the index of the profile loaded */
+const char *config_profile_name(int index); /* its PSN online ID, else "Profile <n>"; a static buffer */
+bool config_profile_select(int index);      /* save the current one, then load that one and remember it */
+int config_profile_create(void);            /* save the current one, start an empty one; its index, -1 if full */
 
 #endif

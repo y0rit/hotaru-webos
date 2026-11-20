@@ -115,6 +115,11 @@ void app_login_pin_submit(const char *pin);
 
 /* the UI edited config_get(): save shortly (debounced, sliders fire on every step) */
 void app_settings_changed(void);
+/* profiles (config.h): switch to another, or start an empty one and switch to it. Only while not
+ * connected: the pending settings are saved first, then the console list is rebuilt and
+ * APP_CHANGED_HOSTS and APP_CHANGED_REG are announced. */
+bool app_profile_select(int index);
+int app_profile_create(void); /* the new profile's index, -1 when there is no room */
 
 /* a release newer than this build: its version ("0.3"), "" while none is known */
 const char *app_update_version(void);

@@ -410,6 +410,31 @@ void app_settings_changed(void) {
     if (!g_save_at) g_save_at = 1;
 }
 
+static void profile_changed(void) {
+    g_selected = -1;
+    hosts_sync();
+    probe_apply();
+    notify(APP_CHANGED_HOSTS);
+    notify(APP_CHANGED_REG);
+}
+
+bool app_profile_select(int index) {
+    if (g_conn != CONN_IDLE) return false;
+    if (index == config_profile_current()) return true;
+    save_pending();
+    if (!config_profile_select(index)) return false;
+    profile_changed();
+    return true;
+}
+
+int app_profile_create(void) {
+    if (g_conn != CONN_IDLE) return -1;
+    save_pending();
+    int index = config_profile_create();
+    if (index >= 0) profile_changed();
+    return index;
+}
+
 const char *app_update_version(void) { return update_latest(); }
 
 int app_host_count(void) { return g_host_count; }

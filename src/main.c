@@ -203,6 +203,7 @@ int main(int argc, char **argv) {
     input_init(ui_group(), &hooks);
 
     if (!getenv("HOTARU_NO_SPLASH")) splash_show();
+    ui_profile_start(); /* more than one profile: who is playing, once the splash is gone */
 
     while (app_running()) {
         poll_sdl();

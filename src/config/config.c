@@ -15,6 +15,7 @@
 
 #define FILE_VERSION 1
 #define FILE_NAME    "hotaru.conf"
+#define PROFILE_FILE "profile"          /* the number of the profile last chosen */
 #define FALLBACK_DIR "/tmp/hotaru"      /* writable everywhere, cleared on boot */
 #define DUID_PREFIX  "0000000700410080" /* chiaki-ng lib/include/chiaki/remote/holepunch.h */
 #define LINE_MAX_LEN 1024               /* longest valid line: an escaped 255-char token + key */
@@ -30,6 +31,7 @@ static int g_host_count;
 static config_psn_t g_psn;
 static char g_duid[CONFIG_DUID_LEN + 1];
 static char g_dir[512], g_path[600];
+static int g_profile = 1; /* the profile number loaded: 1 = hotaru.conf, n = hotaru-<n>.conf */
 
 config_t *config_get(void) { return &g_config; }
 
@@ -72,7 +74,23 @@ static void resolve_path(void) {
         snprintf(g_dir, sizeof(g_dir), "%s", FALLBACK_DIR);
         mkdir_p(g_dir);
     }
-    snprintf(g_path, sizeof(g_path), "%s/" FILE_NAME, g_dir);
+    /* the profile last chosen, when its file is still there */
+    char pf[sizeof(g_dir) + 16];
+    snprintf(pf, sizeof(pf), "%s/" PROFILE_FILE, g_dir);
+    FILE *f = fopen(pf, "r");
+    int n = 1;
+    if (f) {
+        if (fscanf(f, "%d", &n) != 1) n = 1;
+        fclose(f);
+    }
+    g_profile = 1;
+    if (n > 1 && n <= CONFIG_MAX_PROFILES) {
+        char p[sizeof(g_path)];
+        snprintf(p, sizeof(p), "%s/hotaru-%d.conf", g_dir, n);
+        if (access(p, F_OK) == 0) g_profile = n;
+    }
+    if (g_profile == 1) snprintf(g_path, sizeof(g_path), "%s/" FILE_NAME, g_dir);
+    else snprintf(g_path, sizeof(g_path), "%s/hotaru-%d.conf", g_dir, g_profile);
 }
 
 const char *config_path(void) {
@@ -308,6 +326,7 @@ bool config_load(void) {
         if (len == sizeof(line) - 1 && line[len - 1] != '\n') { /* too long: skip the rest, ignore it */
             int c;
             while ((c = fgetc(f)) != EOF && c != '\n') {}
+            if (c == EOF) break;
             continue;
         }
         while (len && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = '\0';
@@ -443,4 +462,107 @@ const char *config_device_uid(void) {
     log_msg("config: generated a device uid");
     config_save();
     return g_duid;
+}
+
+/* ---------- profiles ---------- */
+
+static void profile_file(int n, char *out, size_t cap) {
+    if (n == 1) snprintf(out, cap, "%s/" FILE_NAME, g_dir);
+    else snprintf(out, cap, "%s/hotaru-%d.conf", g_dir, n);
+}
+
+static bool profile_exists(int n) {
+    if (n == 1) return true; /* the first profile is there even before its file is written */
+    char p[sizeof(g_path)];
+    profile_file(n, p, sizeof(p));
+    return access(p, F_OK) == 0;
+}
+
+/* the profile number at that index, 0 if none */
+static int profile_number(int index) {
+    for (int n = 1, i = 0; n <= CONFIG_MAX_PROFILES; n++)
+        if (profile_exists(n) && i++ == index) return n;
+    return 0;
+}
+
+static void profile_remember(void) {
+    char pf[sizeof(g_dir) + 16];
+    snprintf(pf, sizeof(pf), "%s/" PROFILE_FILE, g_dir);
+    FILE *f = fopen(pf, "w");
+    if (!f) {
+        log_event(LOG_WARN, "CONFIG", "cannot write %s: %s", pf, strerror(errno));
+        return;
+    }
+    fprintf(f, "%d\n", g_profile);
+    fclose(f);
+}
+
+static void profile_switch(int n) {
+    g_profile = n;
+    profile_file(n, g_path, sizeof(g_path));
+    profile_remember();
+}
+
+int config_profile_count(void) {
+    resolve_path();
+    int c = 0;
+    for (int n = 1; n <= CONFIG_MAX_PROFILES; n++)
+        if (profile_exists(n)) c++;
+    return c;
+}
+
+int config_profile_current(void) {
+    resolve_path();
+    for (int i = 0, n; (n = profile_number(i)) > 0; i++)
+        if (n == g_profile) return i;
+    return 0;
+}
+
+const char *config_profile_name(int index) {
+    static char name[sizeof(g_psn.online_id) + 16];
+    resolve_path();
+    int n = profile_number(index);
+    if (n <= 0) return "";
+    name[0] = '\0';
+    if (n == g_profile) {
+        snprintf(name, sizeof(name), "%s", g_psn.online_id);
+    } else {
+        char p[sizeof(g_path)], line[LINE_MAX_LEN];
+        profile_file(n, p, sizeof(p));
+        FILE *f = fopen(p, "r");
+        while (f && fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "psn.online_id=", 14) != 0) continue;
+            line[strcspn(line, "\r\n")] = '\0';
+            get_str(line + 14, name, sizeof(name));
+            break;
+        }
+        if (f) fclose(f);
+    }
+    if (!name[0]) snprintf(name, sizeof(name), "Profile %d", n);
+    return name;
+}
+
+bool config_profile_select(int index) {
+    resolve_path();
+    int n = profile_number(index);
+    if (n <= 0) return false;
+    if (n == g_profile) return true;
+    config_save();
+    profile_switch(n);
+    config_load();
+    log_event(LOG_OK, "CONFIG", "profile %s", config_profile_name(index));
+    return true;
+}
+
+int config_profile_create(void) {
+    resolve_path();
+    int n = 2;
+    while (n <= CONFIG_MAX_PROFILES && profile_exists(n)) n++;
+    if (n > CONFIG_MAX_PROFILES) return -1;
+    config_save();
+    profile_switch(n);
+    reset(); /* an empty profile: defaults, no consoles, no PSN account */
+    config_save();
+    log_event(LOG_OK, "CONFIG", "new profile %d", n);
+    return config_profile_current();
 }

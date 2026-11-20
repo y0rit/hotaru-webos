@@ -5,11 +5,14 @@
 #include <stdio.h>
 
 #include "../chiaki/session.h"
+#include "../config/config.h"
 #include "../log.h"
 #include "controls.h"
 #include "dialog.h"
 #include "home.h"
+#include "home_internal.h"
 #include "register.h"
+#include "splash.h"
 #include "stream_menu.h"
 #include "theme.h"
 
@@ -155,6 +158,44 @@ static void sink_key_cb(lv_event_t *e) {
 }
 
 /* ---------- screen ---------- */
+
+/* ---------- profiles ---------- */
+
+static void profile_picked(int index, void *user) {
+    (void)user;
+    if (index < 0 || !app_profile_select(index)) return;
+    home_values_changed();
+    home_settings_refresh();
+}
+
+void ui_profile_choose(void) {
+    int n = config_profile_count();
+    if (n > UI_CHOOSE_MAX) n = UI_CHOOSE_MAX;
+    static char names[UI_CHOOSE_MAX][80];
+    const char *opts[UI_CHOOSE_MAX];
+    for (int i = 0; i < n; i++) {
+        snprintf(names[i], sizeof(names[i]), "%s", config_profile_name(i));
+        opts[i] = names[i];
+    }
+    ui_choose("Who is playing?", "Each profile has its own PSN account, consoles and settings.", opts, n,
+              config_profile_current(), profile_picked, NULL);
+}
+
+void ui_profile_new(void) {
+    if (app_profile_create() < 0) return;
+    home_values_changed();
+    home_settings_refresh();
+    ui_register_open(); /* an empty profile: pair it straight away */
+}
+
+/* once the splash is gone: ask only when there is a choice */
+static void profile_start_cb(lv_timer_t *t) {
+    if (splash_active()) return;
+    lv_timer_del(t);
+    if (config_profile_count() > 1 && !ui_dialog_active() && !ui_register_active()) ui_profile_choose();
+}
+
+void ui_profile_start(void) { lv_timer_create(profile_start_cb, 100, NULL); }
 
 void ui_create(void) {
     lv_obj_t *scr = lv_scr_act();
